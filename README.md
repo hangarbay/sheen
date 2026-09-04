@@ -3,17 +3,19 @@
 Render HTML in the terminal, with pizzazz! The Glow experience, for HTML
 instead of Markdown.
 
+![sheen demo](docs/demo.gif)
+
 ## Install
 
 One-liner (macOS and Linux):
 
 ```
-curl -fsSL https://raw.githubusercontent.com/hangarbay/sheen/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/hangarbay/sheen/main/install.sh | bash
 ```
 
-Or download a tarball from the
-[releases page](https://github.com/hangarbay/sheen/releases) (checksums
-included), or use Go:
+The script downloads the release binary for your platform, verifies its
+sha256 checksum, and installs to `~/.local/bin`. Inside a clone,
+`install.sh --build` compiles from source instead. Or use Go:
 
 ```
 go install github.com/hangarbay/sheen/cmd/sheen@latest
