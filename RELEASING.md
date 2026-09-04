@@ -1,33 +1,31 @@
 # Releasing sheen
 
-1. Bump and tag:
+A single tag-driven GitHub Actions workflow (`.github/workflows/release.yml`)
+builds and publishes everything. No GoReleaser, no secrets beyond the
+built-in `GITHUB_TOKEN`.
 
-   ```
-   git tag v0.1.1 && git push origin v0.1.1
-   ```
+## Cut a release
 
-2. The `Update Homebrew tap` workflow fires on `v*` tags. It downloads the
-   release tarball, computes its sha256, rewrites `Formula/sheen.rb` in
-   `hangarbay/homebrew-tap`, and pushes a `sheen <version>` commit.
+```
+git tag v0.1.2 && git push origin v0.1.2
+```
 
-3. Users get the new version on their next `brew upgrade sheen`
-   (Homebrew auto-updates taps).
+The workflow then:
 
-## One-time setup
+1. builds one artifact per target — darwin/amd64, darwin/arm64,
+   linux/amd64, linux/arm64, windows/amd64 — as
+   `sheen_<version>_<os>_<arch>.tar.gz` (`.zip` for windows), each with
+   README and LICENSE inside, binaries stamped with the version
+2. generates `checksums.txt` over all artifacts
+3. creates the GitHub Release with `gh release create --generate-notes`
 
-The workflow needs push access to the tap. Create a fine-grained personal
-access token:
-
-- Repository access: only `hangarbay/homebrew-tap`
-- Permissions: Contents -> Read and write
-
-Add it as a repository secret named `TAP_TOKEN` on
-`github.com/hangarbay/sheen` (Settings -> Secrets and variables -> Actions).
+Users install with `install.sh` (see README) or by grabbing a tarball from
+the releases page.
 
 ## Notes
 
-- The formula builds from the release tarball, so every tag must point at
-  a commit that compiles (CI runs tests on push; tag from a green master).
-- If installs later feel slow (source builds pull the Go toolchain), the
-  next step is GoReleaser: prebuilt darwin/arm64 + amd64 tarballs attached
-  to the release, and the formula switches to pouring binaries.
+- Tag from a green master; the workflow builds whatever the tag points to.
+- If a release fails, delete the release and tag, then re-tag. The
+  `gh release create` step is not idempotent.
+- Binaries are built with CGO disabled and `-trimpath`, so any runner
+  cross-compiles every target.

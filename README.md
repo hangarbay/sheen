@@ -5,22 +5,18 @@ instead of Markdown.
 
 ## Install
 
-With Homebrew (builds from source; Go is pulled in automatically):
+One-liner (macOS and Linux):
 
 ```
-brew install hangarbay/tap/sheen
+curl -fsSL https://raw.githubusercontent.com/hangarbay/sheen/master/install.sh | sh
 ```
 
-With Go:
+Or download a tarball from the
+[releases page](https://github.com/hangarbay/sheen/releases) (checksums
+included), or use Go:
 
 ```
 go install github.com/hangarbay/sheen/cmd/sheen@latest
-```
-
-From a clone:
-
-```
-make
 ```
 
 ## Usage
