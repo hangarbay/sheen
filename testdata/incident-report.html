@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>INC-2049 · Postmortem · Reply-All Storm on the Notification Bus</title>
+<style>
+body { font-family: Georgia, "Times New Roman", serif; color: #1A1A1A; background: #FCFCF9; margin: 0; }
+.paper { max-width: 760px; margin: 0 auto; padding: 48px 32px; }
+h1.doc-title { font-size: 26px; letter-spacing: .02em; border-bottom: 4px double #1A1A1A; padding-bottom: 12px; }
+.sev-banner { background: #B3261E; color: #FFFFFF; font-family: "Courier New", monospace; letter-spacing: .3em; text-align: center; padding: 8px; font-size: 13px; }
+dl.facts { display: grid; }
+dl.facts dt { font-family: "Courier New", monospace; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: #6B6B6B; margin-top: 14px; }
+dl.facts dd { margin: 2px 0 0; font-size: 15px; }
+.exec { font-size: 17px; line-height: 1.7; }
+.exec q { quotes: none; font-style: italic; }
+section { margin-top: 40px; }
+h2 { font-family: "Courier New", monospace; font-size: 15px; letter-spacing: .18em; text-transform: uppercase; border-left: 6px solid #B3261E; padding-left: 10px; }
+ol.timeline > li { margin-bottom: 10px; }
+ol.timeline ol { list-style-type: lower-alpha; margin-top: 8px; }
+ol.timeline ol ol { list-style-type: lower-roman; }
+ol.timeline ol ol ol { list-style-type: decimal; }
+table.metrics { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.metrics th, table.metrics td { border: 1px solid #C9C9C0; padding: 6px 10px; text-align: right; }
+table.metrics th { background: #EFEFE8; font-family: "Courier New", monospace; font-size: 11px; }
+table.metrics td:first-child, table.metrics th:first-child { text-align: left; }
+tr.breached td { background: #F7E1E0; }
+mark { background: #FFF176; padding: 0 3px; }
+del { color: #8A8A8A; }
+ins { text-decoration: none; border-bottom: 2px solid #1F6B4D; }
+.flame { background: #10151C; color: #E6EBF1; font-family: "Courier New", monospace; font-size: 12px; padding: 16px; overflow-x: auto; white-space: pre; }
+.timeline-note { font-size: 12px; color: #6B6B6B; }
+blockquote.customer { border: 1px solid #C9C9C0; padding: 14px 18px; font-size: 15px; background: #FFFFFF; }
+blockquote.customer .who { display: block; margin-top: 8px; font-size: 12px; color: #6B6B6B; font-family: "Courier New", monospace; }
+code { font-family: "Courier New", monospace; background: #EFEFE8; padding: 1px 4px; }
+pre.yaml { background: #EFEFE8; border: 1px solid #C9C9C0; font-family: "Courier New", monospace; font-size: 12.5px; padding: 12px; overflow-x: auto; }
+abbr { border-bottom: 1px dotted #6B6B6B; }
+.action-items li { margin-bottom: 8px; }
+.owner { font-family: "Courier New", monospace; font-size: 12px; color: #6B6B6B; }
+.unbreakable { font-family: "Courier New", monospace; font-size: 11px; word-break: break-all; color: #6B6B6B; }
+.sig { text-align: right; font-style: italic; margin-top: 48px; }
+.print-only { display: none; }
+.hidden-note { visibility: hidden; }
+@media print { body { background: #FFFFFF; } .sev-banner { color: #B3261E; background: transparent; } }
+</style>
+</head>
+<body>
+<div class="paper">
+
+<p class="sev-banner">SEV-1 &nbsp;·&nbsp; CUSTOMER-VISIBLE &nbsp;·&nbsp; 47 MINUTES</p>
+
+<h1 class="doc-title">INC-2049 &mdash; Reply-All Storm on the Notification Bus</h1>
+
+<dl class="facts">
+  <dt>Status</dt><dd>resolved &mdash; monitoring through <abbr title="2026-09-06">T+48h</abbr></dd>
+  <dt>Impact</dt><dd>31,204 tenants received duplicated push notifications; 8,912 received them &gt;12 times</dd>
+  <dt>Region</dt><dd>ap-northeast-1 (primary), eu-central-1 (read replica)</dd>
+  <dt>Duration</dt><dd>2026-09-03 21:07 UTC &rarr; 21:54 UTC</dd>
+  <dt>Incident Commander</dt><dd>Yuki Tanaka（田中 由紀）</dd>
+  <dt>Author</dt><dd>Dae-Hyun Park（박대현）</dd>
+  <dt>Comms lead</dt><dd>Amara Okafor</dd>
+  <dt>Correlation ID</dt><dd><span class="unbreakable">a3f8c2e19b4d7e6051f2c8b9d0a4e7f13c6b9d2e5a8f1c4b7d0e3a6f9c2b5d8e1f4a7b0c3d6e9f2a5b8c1d4e7f0a3b6c9d2e5f8a1b4c7d0e3f6a9b2c5d8e1f4a7b0</span></dd>
+</dl>
+
+<section>
+  <h2>Executive summary</h2>
+  <p class="exec">A config push at 21:07 UTC replaced the notification fanout topic ARN with a
+  <mark>self-referencing ARN</mark>. Every published event was re-consumed by its own publisher,
+  multiplying once per loop with a 3-second period. The blast-radius guardrail existed but was
+  <em>disabled by the same push</em>. Customer-visible symptom: notification storms, up to
+  <del>twelve</del> <ins>forty-one</ins> duplicates per tenant. No data loss; no unauthorized access.
+  Recovery was manual because the kill switch lived behind the same misconfigured deploy.</p>
+  <blockquote class="customer">
+    <q>Our phones buzzed forty times in ten minutes. We thought we were being attacked;
+    it turned out we were being congratulated, repeatedly, for yesterday's deployment.</q>
+    <span class="who">&mdash; Head of Platform, customer #4471 (tenant apne1-88, name withheld)</span>
+  </blockquote>
+</section>
+
+<section>
+  <h2>Timeline &mdash; all times UTC</h2>
+  <ol class="timeline">
+    <li><strong>20:58</strong> &mdash; change <code>conf-8841</code> merged: fanout topic
+      <code>notify-prod-apne1</code> → <code>notify-prod-apne1-selftest</code>
+      <ol>
+        <li>authored to test the new <em>self-probe</em> health check
+          <ol>
+            <li>probe intended for the <em>staging</em> alias only
+              <ol>
+                <li>staging alias pointer was stale since INC-1977</li>
+                <li>reviewer approved with <code>lgtm</code>, diff collapsed by default</li>
+              </ol>
+            </li>
+            <li>guardrail flag <code>fanout.max-redeliver</code> flipped to <code>0</code> <mark>(off)</mark>
+              in the same diff</li>
+          </ol>
+        </li>
+      </ol>
+    </li>
+    <li><strong>21:07:12</strong> &mdash; config push propagates (12s): first self-delivery observed</li>
+    <li><strong>21:09</strong> &mdash; pager fires: <code>NotificationDuplicationRatio &gt; 2.0</code>
+      <ol>
+        <li>dashboard shows ratio climbing 2&times; every ~3s &mdash; geometric, not linear</li>
+      </ol>
+    </li>
+    <li><strong>21:14</strong> &mdash; IC declares <abbr title="SEV-1">SEV1</abbr>; comms lead posts first status</li>
+    <li><strong>21:22</strong> &mdash; first mitigation attempt: rollback via pipeline
+      <ol>
+        <li><strong>fails</strong> &mdash; pipeline applies the same broken config layer</li>
+      </ol>
+    </li>
+    <li><strong>21:41</strong> &mdash; manual config surgery through the admin console (bypasses pipeline)</li>
+    <li><strong>21:47</strong> &mdash; duplication ratio returns to 1.0; queues drain</li>
+    <li><strong>21:54</strong> &mdash; declared resolved; 31,204 tenants affected total</li>
+  </ol>
+  <p class="timeline-note">Times from CloudTrail + container logs; skew corrected against the
+  stratum-1 clock, ±800ms.</p>
+</section>
+
+<section>
+  <h2>What broke, exactly</h2>
+  <pre class="flame">fanout-loop flame graph (3s loop, 21:07→21:47)
+─────────────────────────────────────────────────
+publish            ██████████████████████████████  29.1s  9,701 msg/s
+ ├ consume         ██████████████████████████████  self ARN matched
+ │  ├ deserialize  ████                            3.8s
+ │  ├ route:match  ██████████████████████████████  ← 100% self-route (bug)
+ │  └ publish      ██████████████████████████████  re-enters publish
+ └ metrics.emit    █                               0.9s  (looked healthy!)</pre>
+  <pre class="yaml"># the offending layer, redacted
+fanout:
+  topic_arn: ${NOTIFY_TOPIC}          # resolved to… itself
+  max_redeliver: 0                    # guardrail disabled by this diff
+  self_probe:
+    enabled: true
+    interval: 3s
+    expect_deliveries: 1              # probe passed by feeding itself</code></pre>
+  <p>The health check <em>worked as written</em>: it expected exactly one delivery and got it,
+  from itself. Monitoring stayed green for the entire incident because
+  <code>probe_status == ok</code> was the alert that mattered most.</p>
+</section>
+
+<section>
+  <h2>Metrics during the window</h2>
+  <table class="metrics">
+    <thead>
+      <tr><th>Indicator</th><th>21:07</th><th>21:15</th><th>21:30</th><th>21:47</th><th>SLO</th></tr>
+    </thead>
+    <tbody>
+      <tr class="breached"><td>duplication ratio</td><td>1.0</td><td>8.4</td><td>41.9</td><td>1.0</td><td>&le; 1.01</td></tr>
+      <tr class="breached"><td>publish p99 (ms)</td><td>12</td><td>210</td><td>640</td><td>13</td><td>&le; 50</td></tr>
+      <tr><td>delivery success %</td><td>99.98</td><td>99.91</td><td>99.87</td><td>99.99</td><td>&ge; 99.9</td></tr>
+      <tr><td>config revision drift</td><td>0</td><td>1</td><td>1</td><td>0</td><td>0</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Action items</h2>
+  <ul class="action-items">
+    <li>Guardrail flags may not ship in the same diff as the feature they guard &mdash; CI check.
+      <span class="owner">owner: dae-hyun · due 2026-09-12 · P0</span></li>
+    <li>Self-probe health checks validate against a <em>separate</em> probe topic, never production.
+      <span class="owner">owner: yuki · due 2026-09-19 · P0</span></li>
+    <li>Rollback path must not share config layers with forward deploys.
+      <span class="owner">owner: amara · due 2026-09-26 · P1</span></li>
+    <li>Add duplication-ratio alert independent of probe status.
+      <span class="owner">owner: yuki · done 2026-09-04 · P0 ✅</span></li>
+  </ul>
+  <p>Honest smaller number: the full fix is a CI check and a topic rename &mdash; a day of work.
+  A fanout rewrite was discussed and is <strong>not</strong> part of this plan.</p>
+</section>
+
+<section>
+  <h2>Appendix</h2>
+  <p>Per-tenant duplicate distribution peaked with <abbr title="forty-one">41</abbr> deliveries;
+  the <code>&#x1F680;</code> congratulations payload was <code>deploy-success-v2</code> for build
+  <code>2026.36.3</code>. Raw config layer for forensic reference:</p>
+  <p class="unbreakable">layerdigest: sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8550000000000000000000000000000000000000000000000000000000000000000</p>
+  <p aria-hidden="true">debug: this paragraph must never appear in output.</p>
+  <p hidden>hidden: neither may this one.</p>
+  <p><del>Drafted under time pressure at 23:40 UTC.</del> <ins>Reviewed by the IC before publication.</ins></p>
+</section>
+
+<p class="sig">Yuki Tanaka（田中 由紀） &mdash; Incident Commander &mdash; &copy; 2026 hangarbay &mdash; 🛩️</p>
+
+</div>
+</body>
+</html>

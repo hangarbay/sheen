@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PR #412 · render: shrink tables to terminal width · hangarbay/sheen</title>
+<style>
+body { margin: 0; font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; font-size: 14px; color: #1F2328; background: #FFFFFF; }
+a { color: #0969DA; text-decoration: none; }
+a:hover { text-decoration: underline; }
+#page-header { padding: 16px 24px; border-bottom: 1px solid #D1D9E0; background: #F6F8FA; }
+h1.gh-title { font-size: 18px; font-weight: 400; margin: 0; }
+h1.gh-title b { font-weight: 600; }
+.breadcrumbs { color: #59636E; font-size: 12px; margin-top: 4px; }
+.state-open { display: inline-block; padding: 3px 12px; border-radius: 2em; background: #1F883D; color: #FFFFFF; font-weight: 500; }
+.state-merged { display: inline-block; padding: 3px 12px; border-radius: 2em; background: #8250DF; color: #FFFFFF; font-weight: 500; }
+.meta-bar { display: flex; gap: 16px; padding: 8px 24px; border-bottom: 1px solid #D1D9E0; color: #59636E; font-size: 12px; }
+.meta-bar .count { font-weight: 600; color: #1F2328; }
+.timeline { max-width: 1012px; margin: 0 auto; padding: 16px 24px; }
+.comment { border: 1px solid #D1D9E0; border-radius: 6px; margin: 16px 0; }
+.comment-header { background: #F6F8FA; padding: 8px 16px; border-bottom: 1px solid #D1D9E0; font-size: 13px; }
+.comment-header .author { font-weight: 600; }
+.comment-header .badge { font-size: 11px; border: 1px solid #D1D9E0; border-radius: 2em; padding: 0 7px; margin-left: 6px; color: #59636E; }
+.comment-body { padding: 16px; line-height: 1.5; }
+.comment-body p { margin: 0 0 12px; }
+.task-list { list-style: none; padding-left: 24px; margin: 8px 0; }
+.task-list ul { list-style: disc; }
+.diff-file { border: 1px solid #D1D9E0; border-radius: 6px; margin: 16px 0; overflow: hidden; }
+.diff-file-header { background: #F6F8FA; padding: 8px 12px; font-family: ui-monospace, monospace; font-size: 12px; border-bottom: 1px solid #D1D9E0; }
+.diff-file-header .added { color: #1F883D; font-weight: 600; }
+.diff-file-header .deleted { color: #CF222E; font-weight: 600; }
+table.diff { border-collapse: collapse; width: 100%; font-family: ui-monospace, "SF Mono", monospace; font-size: 12px; }
+table.diff td { padding: 2px 10px; vertical-align: top; white-space: pre; }
+td.lineno { width: 1%; color: #8C959F; text-align: right; user-select: none; background: #F6F8FA; border-right: 1px solid #D1D9E0; }
+tr.add td.code { background: #DAFBE1; }
+tr.del td.code { background: #FFEBE9; }
+tr.hunk td { background: #DDF4FF; color: #57606A; font-size: 11px; padding: 4px 10px; }
+.inline-comment { margin: 8px 16px 8px 56px; border-left: 3px solid #D1D9E0; padding: 8px 12px; background: #F6F8FA; border-radius: 0 6px 6px 0; }
+.approvals { background: #DAFBE1; border: 1px solid #1F883D; border-radius: 6px; padding: 12px 16px; font-size: 13px; }
+blockquote { margin: 8px 0; padding: 0 12px; color: #59636E; border-left: 3px solid #D1D9E0; }
+code { font-family: ui-monospace, monospace; background: #F6F8FA; padding: .2em .4em; border-radius: 6px; font-size: 85%; }
+pre { background: #F6F8FA; border-radius: 6px; padding: 16px; overflow-x: auto; font-size: 12px; }
+sup { font-size: 75%; }
+.reaction { border: 1px solid #D1D9E0; border-radius: 2em; padding: 1px 8px; font-size: 12px; background: #F6F8FA; }
+.avatars img { border-radius: 50%; border: 1px solid #D1D9E0; }
+footer { text-align: right; color: #8C959F; font-size: 11px; padding: 24px; border-top: 1px solid #D1D9E0; }
+.broken-image-note { display: none; }
+</style>
+</head>
+<body>
+
+<div id="page-header">
+  <h1 class="gh-title"><b>render: shrink tables to terminal width</b> <span class="state-open">Open</span></h1>
+  <p class="breadcrumbs"><a href="#">hangarbay</a> / <a href="#">sheen</a> / <b>PR #412</b> ·
+    <code>feat/table-shrink</code> → <code>master</code></p>
+</div>
+<div class="meta-bar">
+  <span><abbr title="pull request">PR</abbr> opened Sep 3, 2026 by <b>fighterjock</b></span>
+  <span><span class="count">14</span> commits</span>
+  <span><span class="count">+287</span> <span style="color:#1F883D">−41</span></span>
+  <span><span class="count">7</span> files changed</span>
+  <span><span class="count">12</span> conversations</span>
+</div>
+
+<div class="timeline">
+
+  <div class="comment">
+    <div class="comment-header">
+      <span class="author">fighterjock</span> commented
+      <span class="badge">Author</span> · Sep 3, 2026
+    </div>
+    <div class="comment-body">
+      <p>Fixes <a href="#">#397 (Bananas overflow the viewport)</a> and lays groundwork for
+      <abbr title="wide character">wcwidth</abbr> work tracked in FP-004<sup><a href="#">1</a></sup>.</p>
+      <p>Shrink policy, in priority order:</p>
+      <ul class="task-list">
+        <li>☐ proportional shrink with a 3-cell column floor</li>
+        <li>☐ ellipsis via <code>ansi.Truncate</code> (<code>…</code> counts as 1 cell)</li>
+        <li>☑ ANSI escape-aware width measurement
+          <ul>
+            <li>SGR runs are zero-width</li>
+            <li>OSC 8 hyperlink envelopes are zero-width<sup><a href="#">2</a></sup></li>
+          </ul>
+        </li>
+        <li>☐ <code>--width-tables=off</code> escape hatch</li>
+      </ul>
+      <p>Checklist for reviewers:</p>
+      <ul class="task-list">
+        <li>☐ does <code>min-width</code> interact sanely with <code>text-align: center</code>?</li>
+        <li>☐ golden fixtures regenerated for <code>testdata/</code></li>
+      </ul>
+      <p><span class="reaction">👍 3</span> <span class="reaction">🚀 1</span> <span class="reaction">👀 2</span></p>
+    </div>
+  </div>
+
+  <div class="comment">
+    <div class="comment-header"><span class="author">maintainer-bot</span> · <span class="badge">CI</span></div>
+    <div class="comment-body">
+      <p>All checks passed <code>go test ./... · 41.2s</code> — coverage 91.4% <b>(+2.1%)</b>.</p>
+    </div>
+  </div>
+
+  <div class="diff-file">
+    <div class="diff-file-header">render/table.go ·
+      <span class="added">+96</span> <span class="deleted">−12</span> · 4 hunks</div>
+    <table class="diff">
+      <tr><td class="lineno">…</td><td class="code">func boxTable(headers []string, rows [][]string, ps preset, width int) string {</td></tr>
+      <tr class="hunk"><td class="lineno">…</td><td class="code">@@ -118,6 +118,14 @@ func boxTable(</td></tr>
+      <tr><td class="lineno">118</td><td class="code"> 	widths := make([]int, ncols)</td></tr>
+      <tr class="add"><td class="lineno">119</td><td class="code"><ins>+ 	total := rowWidth(widths)</ins></td></tr>
+      <tr class="add"><td class="lineno">120</td><td class="code"><ins>+ 	for total &gt; width {</ins></td></tr>
+      <tr class="add"><td class="lineno">121</td><td class="code"><ins>+ 		if best := widest(widths, 3); best &lt; 0 {</ins></td></tr>
+      <tr class="add"><td class="lineno">122</td><td class="code"><ins>+ 			break // nothing left to shrink</ins></td></tr>
+      <tr class="add"><td class="lineno">123</td><td class="code"><ins>+ 		}</ins></td></tr>
+      <tr class="add"><td class="lineno">124</td><td class="code"><ins>+ 		widths[best]--</ins></td></tr>
+      <tr class="add"><td class="lineno">125</td><td class="code"><ins>+ 	}</ins></td></tr>
+      <tr class="del"><td class="lineno">—</td><td class="code"><del>- 	// TODO: tables wider than the terminal just overflow for now</del></td></tr>
+      <tr><td class="lineno">126</td><td class="code"> 	for _, row := range all {</td></tr>
+    </table>
+    <div class="inline-comment">
+      <p><b>pteropus</b> commented: is the 3-cell floor enough for
+      <code>計算機</code>-style CJK headers? One wide rune eats 2 cells, so a 3-cell column shows
+      1.5 runes worth of padding. Suggest asserting a fixture for it.</p>
+      <blockquote>Yes — added <code>testdata/cjk-table.html</code> to the same commit, golden test
+      pins it. The 1.5-rune case truncates rather than misaligns by design.</blockquote>
+    </div>
+  </div>
+
+  <div class="diff-file">
+    <div class="diff-file-header">internal/render/wrap.go ·
+      <span class="added">+41</span> <span class="deleted">−18</span></div>
+    <table class="diff">
+      <tr class="hunk"><td class="lineno">…</td><td class="code">@@ -61,9 +61,13 @@ func buildItems(segs []seg) []witem {</td></tr>
+      <tr><td class="lineno">61</td><td class="code"> 	for _, sg := range segs {</td></tr>
+      <tr class="del"><td class="lineno">—</td><td class="code"><del>- 		w := runewidth.StringWidth(word)</del></td></tr>
+      <tr class="add"><td class="lineno">—</td><td class="code"><ins>+ 		w := ansi.StringWidth(word) // escape-aware, grapheme-clustered</ins></td></tr>
+      <tr><td class="lineno">62</td><td class="code"> 		items = append(items, witem{</td></tr>
+    </table>
+  </div>
+
+  <div class="comment">
+    <div class="comment-header"><span class="author">pteropus</span> approved · <span class="badge">Reviewer</span></div>
+    <div class="comment-body">
+      <p>Approving modulo the CJK fixture. Non-blocking thoughts:</p>
+      <pre><code class="language-python">def shrink(widths, budget):
+    """Proportional shrink with per-column floor — reference for the Go port."""
+    while sum(widths) + 3 * len(widths) + 1 &gt; budget:
+        widest = max(range(len(widths)), key=lambda i: widths[i])
+        if widths[widest] &lt;= 3:
+            raise ValueError("cannot shrink further")
+        widths[widest] -= 1
+    return widths</code></pre>
+      <p>Screenshots from the manual pass (terminal renders):</p>
+      <p class="avatars">
+        <img src="shots/before.png" alt="before: table overflows terminal edge" width="400">
+        <img src="shots/after.png" alt="after: table fits with ellipsis" width="400">
+      </p>
+      <p>Verified on <kbd>⌘⇧T</kbd> in iTerm2 3.5 and Terminal.app.</p>
+      <p>Meta note: the fixture generator embeds a 96-char unbroken JWT —
+      <code>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U</code> —
+      to pin the hard-split path.<sup><a href="#">3</a></sup></p>
+    </div>
+  </div>
+
+  <div class="approvals">
+    ✔️ <b>2 approvals</b>: pteropus, hangarbay-bot · 1 changes requested (stale, resolved) ·
+    mergeable · <code>go 1.27.x</code>
+  </div>
+
+  <details>
+    <summary>CI matrix details (click to expand)</summary>
+    <pre><code class="language-json">{
+  "go":    ["1.26.x", "1.27.x"],
+  "os":    ["ubuntu-latest", "macos-latest"],
+  "arch":  ["amd64", "arm64"],
+  "flakes": 0
+}</code></pre>
+  </details>
+
+</div>
+
+<footer>
+  footnotes: <sup>1</sup> internal brief, not public · <sup>2</sup> see x/ansi#42 ·
+  <sup>3</sup> synthetic token, safe · last rendered by sheen 0.1.1 &copy; 2026 · 🛩️
+</footer>
+<p class="broken-image-note">this must never render</p>
+</body>
+</html>

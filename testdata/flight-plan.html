@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheen Width Engine Flight Plan</title>
+<meta name="description" content="Flight Plan FP-004: make sheen's tables and wrapping honest about terminal width.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛩️</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* hangarbay house style — technical brief */
+:root {
+  --bg: #EFF2F4; --surface: #FFFFFF; --surface-2: #F7F9FA;
+  --ink: #10151C; --ink-2: #4C5661; --ink-3: #6E7A86;
+  --rule: #D8DFE5; --rule-2: #E7ECF0;
+  --accent: #9A6200; --accent-bg: #FDF2DC; --accent-ink: #6B4400;
+  --deck: #10151C; --deck-ink: #E6EBF1;
+  --ok: #1F6B4D; --warn: #8A5A00; --crit: #99331F;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0C1116; --surface: #141C24; --surface-2: #101820;
+    --ink: #E6EBF1; --ink-2: #A5B1BD; --ink-3: #7D8996;
+    --rule: #253039; --rule-2: #1C252E;
+    --accent: #FFB000; --accent-bg: #2A2010; --accent-ink: #FFCC5C;
+    --deck: #05080B; --deck-ink: #E6EBF1;
+    --ok: #4FBE8B; --warn: #E0A22E; --crit: #E8735A;
+  }
+}
+body { background: var(--bg); color: var(--ink); font-family: "IBM Plex Sans", sans-serif; line-height: 1.62; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 0 24px 96px; }
+.mast { background: var(--deck); color: var(--deck-ink); border-bottom: 3px solid var(--accent); }
+.org { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: #93A0AE; }
+h1 { font-family: "Saira Condensed", sans-serif; font-weight: 700; font-size: 56px; line-height: .96; text-transform: uppercase; }
+.thesis { font-size: 17px; color: #B6C1CC; max-width: 60ch; }
+.thesis b { color: var(--deck-ink); }
+section { margin-top: 52px; }
+.eyebrow { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+h2 { font-family: "Saira Condensed", sans-serif; font-weight: 700; font-size: 30px; text-transform: uppercase; }
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--rule); padding: 0 14px 8px 0; }
+td { padding: 11px 14px 11px 0; border-bottom: 1px solid var(--rule-2); color: var(--ink-2); }
+td:first-child { color: var(--ink); }
+tr:last-child td { border-bottom: 0; }
+figcaption { font-size: 13px; color: var(--ink-3); font-style: italic; }
+.phase { display: grid; grid-template-columns: 52px 1fr; padding: 20px 0; border-top: 1px solid var(--rule-2); }
+.phase-n { font-family: "Saira Condensed", sans-serif; font-weight: 700; font-size: 30px; color: var(--accent); }
+.phase h3 { margin: 0 0 4px; }
+.phase p { margin: 0; font-size: 14.5px; color: var(--ink-2); }
+.ship { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 11px; text-transform: uppercase; color: var(--accent-ink); background: var(--accent-bg); border: 1px solid var(--accent); padding: 2px 7px; }
+.hazard { display: grid; grid-template-columns: 86px 1fr; padding: 16px 0; border-top: 1px solid var(--rule-2); }
+.sev { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; text-transform: uppercase; }
+.sev.high { color: var(--crit); }
+.sev.med { color: var(--warn); }
+.sev.low { color: var(--ok); }
+.note { border-left: 3px solid var(--accent); background: var(--surface-2); padding: 16px 18px; }
+pre { background: var(--deck); color: var(--deck-ink); font-family: "IBM Plex Mono", monospace; font-size: 13px; padding: 16px 18px; overflow-x: auto; }
+.bay { display: grid; grid-template-columns: 130px 1fr; padding: 15px 0; border-top: 1px solid var(--rule-2); }
+.bay-name { font-family: "IBM Plex Mono", monospace; font-weight: 500; }
+.bay-name span { display: block; font-size: 11px; text-transform: uppercase; color: var(--ink-3); }
+footer { margin-top: 60px; padding-top: 22px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--ink-3); }
+#debug-panel { display: none; }
+@media print { .mast { background: #FFFFFF; } }
+</style>
+</head>
+<body>
+<div class="mast">
+  <div class="wrap">
+    <p class="org">🛩️ HANGARBAY &middot; FLIGHT PLAN FP-004 &middot; 2026-09-04</p>
+    <h1>Sheen Width Engine</h1>
+    <p class="thesis">Rebuild sheen's word wrapper as a real <b>cell-width layout engine</b> so tables and CJK
+    text stop overflowing terminals &mdash; and deliberately <b>not</b> a general CSS layout
+    system: no floats, no flexbox, no margins.</p>
+  </div>
+</div>
+<div class="wrap">
+
+<section>
+  <p class="eyebrow">LEDE</p>
+  <p>Sheen renders HTML to terminals today, but its wrapper measures in runes, not cells. Two
+  families of content break it: wide glyphs (CJK, emoji) that occupy two cells, and tables whose
+  columns are wider than the viewport. Both fail <em>silently</em> &mdash; the worst kind of
+  layout bug, because the user assumes the terminal ate the output.</p>
+</section>
+
+<section>
+  <p class="eyebrow">ARCHITECTURE</p>
+  <h2>Pipeline</h2>
+  <figure>
+    <svg viewBox="0 0 760 180" role="img" aria-label="Render pipeline diagram">
+      <rect x="20" y="50" width="120" height="60" fill="var(--surface)" stroke="var(--ink)"/>
+      <text x="80" y="85" text-anchor="middle" fill="var(--ink)" font-size="13">html.Parse</text>
+      <rect x="200" y="50" width="120" height="60" fill="var(--surface)" stroke="var(--ink)"/>
+      <text x="260" y="85" text-anchor="middle" fill="var(--ink)" font-size="13">matchSelector</text>
+      <rect x="380" y="50" width="120" height="60" fill="var(--surface)" stroke="var(--ink)"/>
+      <text x="440" y="85" text-anchor="middle" fill="var(--ink)" font-size="13">buildItems</text>
+      <rect x="560" y="50" width="160" height="60" fill="var(--accent-bg)" stroke="var(--accent)"/>
+      <text x="640" y="85" text-anchor="middle" fill="var(--accent-ink)" font-size="13">wrapPara → paint</text>
+      <line x1="140" y1="80" x2="200" y2="80" stroke="var(--ink)" marker-end="url(#a)"/>
+      <line x1="320" y1="80" x2="380" y2="80" stroke="var(--ink)"/>
+      <line x1="500" y1="80" x2="560" y2="80" stroke="var(--ink)"/>
+      <text x="440" y="140" text-anchor="middle" fill="var(--ink-3)" font-size="11">seg stream (style, href, runes)</text>
+    </svg>
+    <figcaption>One pass, five stages; the highlighted stage is the only one this plan touches.</figcaption>
+  </figure>
+  <pre><code>┌──────────┐   DOM    ┌───────────┐  styleState  ┌────────────┐  items  ┌─────────────┐
+│ html.Parse│ ───────▶ │ matchSelec│ ───────────▶ │ buildItems │ ──────▶ │  wrapPara   │
+└──────────┘          │ tor+cascad│              │ (seg stream)│         │  ┌────────┐ │
+                      └───────────┘              └────────────┘         │  │ width  │ │
+                                                                        │  │ engine │ │
+                                                                        │  └────────┘ │
+                                                                        └──────┬──────┘
+                                                     styled lines ◀───────────┘</code></pre>
+</section>
+
+<section>
+  <p class="eyebrow">THE BUILD</p>
+  <h2>Wrapping is measurement, not splitting</h2>
+  <p>The reframe: today's <code>wrapPara</code> decides <em>where to break</em>; the new engine
+  decides <em>what fits</em>. Break points are a consequence of a cell budget per line
+  (<code>width &minus; indent &minus; border</code>), computed once per paragraph against a
+  <code>cache[segment] → []cellRun</code> table. Everything downstream &mdash; tables, blockquotes,
+  list markers &mdash; consumes the same budget function instead of re-implementing arithmetic.</p>
+</section>
+
+<section>
+  <p class="eyebrow">SUBSTANCE TABLE</p>
+  <h2>Property → terminal mapping</h2>
+  <div class="scroll">
+  <table>
+    <thead>
+      <tr><th>CSS input</th><th>Engine behavior</th><th>Cell cost model</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>width: 40ch</code></td><td>per-paragraph budget override</td><td>budget = min(40, terminal &minus; indents)</td></tr>
+      <tr><td>CJK rune (U+4E00&ndash;9FFF)</td><td>two-cell run, never split mid-rune</td><td>2 cells, break-adjacent only</td></tr>
+      <tr><td>Emoji ZWJ sequence</td><td>grapheme cluster unit</td><td>2 cells (presentation), 0 for ZWJ</td></tr>
+      <tr><td><code>white-space: pre</code></td><td>budget bypassed entirely</td><td>horizontal overflow tolerated</td></tr>
+      <tr><td><code>text-align: center</code></td><td>padding after wrap, before paint</td><td>(budget &minus; cells) / 2</td></tr>
+      <tr><td>table column <code>&lt;th&gt;</code></td><td>proportional shrink, floor 3 cells</td><td>&Sigma;width<sub>cols</sub> + 3&middot;n + 1 &le; terminal</td></tr>
+      <tr><td>ANSI/OSC 8 in segment</td><td>zero-width by definition</td><td>0 cells (escape-aware scanner)</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <p class="eyebrow">SPIKE THIS FIRST</p>
+  <div class="note">
+    <p><strong>The riskiest unknown is grapheme segmentation, not width tables.</strong> Whether a
+    ZWJ emoji family emoji (<code>U+1F468 U+200D U+1F469 U+200D U+1F466</code>) occupies 2 cells or 4
+    differs by terminal, and <code>go-runewidth</code> and the standards disagree today. If sheen
+    guesses wrong, every CJK/emoji doc renders misaligned &mdash; the exact bug this plan exists to
+    kill.</p>
+    <p>Options, ranked: (1) adopt <code>rivo/uniseg</code> grapheme clusters + runewidth per cluster;
+    (2) per-cluster lookup with a hand-rolled ZWJ table; (3) treat all non-ASCII as 2 cells. Timebox:
+    <strong>two days</strong> on option 1 against Terminal.app, iTerm2, Kitty, and Alacritty. Fallback if
+    terminals disagree irreconcilably: option 3, and document the caveat in the README.</p>
+  </div>
+</section>
+
+<section>
+  <p class="eyebrow">PHASES</p>
+  <h2>The sequence</h2>
+  <div class="phases">
+    <div class="phase"><div class="phase-n">01</div><div>
+      <h3>Grapheme spike (timeboxed)</h3>
+      <p>Two days, option 1 above, decision recorded in this document's footer. No other work starts until it lands.</p>
+    </div></div>
+    <div class="phase"><div class="phase-n">02</div><div>
+      <h3>Cell budget engine + wrapPara rewrite</h3>
+      <p>Single budget function, cache table, ANSI-aware zero-width scanning. Prose, lists, and blockquotes migrate; tables keep the old shrinker.</p>
+      <span class="ship">ships &middot; v0.3.0</span>
+    </div></div>
+    <div class="phase"><div class="phase-n">03</div><div>
+      <h3>Table shrink policies</h3>
+      <p>Proportional shrink with 3-cell floor, ellipsis via <code>ansi.Truncate</code>, and the substance table's formula as a regression test.</p>
+      <span class="ship">ships &middot; v0.3.1</span>
+    </div></div>
+    <div class="phase"><div class="phase-n">04</div><div>
+      <h3>Pre/nowrap escape hatches</h3>
+      <p>Overflow tolerated for <code>white-space: pre</code>; nowrap paragraphs clip instead of wrap. Polish only; no new CSS surface.</p>
+    </div></div>
+  </div>
+</section>
+
+<section>
+  <p class="eyebrow">HAZARDS</p>
+  <h2>What can hurt</h2>
+  <div class="hazard"><div class="sev high">HIGH</div><div>
+    <h3>Terminals disagree on emoji width</h3>
+    <p>Blocks phase 03's table alignment for anyone living in Kitty. Mitigation: the documented
+    fallback (all-non-ASCII = 2 cells) and a <code>--width-ascii-only</code> escape hatch.</p>
+  </div></div>
+  <div class="hazard"><div class="sev med">MED</div><div>
+    <h3>Scope creep into a layout engine</h3>
+    <p>"Since we have a budget function, add floats" is the road to a half-finished browser. The
+    thesis line exists to be quoted back at whoever proposes it.</p>
+  </div></div>
+  <div class="hazard"><div class="sev med">MED</div><div>
+    <h3>glow ships the same fix first</h3>
+    <p>If charmbracelet lands cell-aware table rendering, sheen's differentiation shrinks to HTML
+    input. Would hurt contributor morale more than usage; response is to ship phase 02 early and
+    brag about CJK handling.</p>
+  </div></div>
+  <div class="hazard"><div class="sev low">LOW</div><div>
+    <h3>runewidth table licensing</h3>
+    <p>MIT, same as sheen &mdash; no action, listed so nobody re-derives the question.</p>
+  </div></div>
+</section>
+
+<section>
+  <p class="eyebrow">REPOS / COMPONENTS</p>
+  <div class="bay"><div class="bay-name">sheen<span>CLI</span></div>
+    <p>All engine work lands here; the repo that attracts contributors.</p></div>
+  <div class="bay"><div class="bay-name">testdata<span>fixtures</span></div>
+    <p>CJK, emoji, and wide-table fixtures live beside the code as golden tests. Earns nothing; saves weekends.</p></div>
+</section>
+
+<footer>
+  <p>Verified 2026-09-04: go 1.27.1 <code>-ldflags "-X"</code> semantics against a minimal module
+  (full import paths silently ignored for <code>main</code> packages; <code>main.Version</code>
+  works); x/net/html entity decoding per WHATWG named references. Unverified and assumed:
+  per-terminal emoji width agreement (phase 01 spike), <code>rivo/uniseg</code> API surface, and
+  the claim that kitty disagrees with Terminal.app at all &mdash; that's what the spike is for.</p>
+</footer>
+
+</div>
+<div id="debug-panel">internal: do not render this line</div>
+</body>
+</html>
