@@ -110,6 +110,9 @@ func (m model) View() tea.View {
 	b.WriteString("\n")
 	b.WriteString(m.statusBar())
 	v := tea.NewView(b.String())
+	// run on the alternate screen: the page fills the whole terminal and
+	// vanishes completely on quit, restoring the user's shell exactly
+	v.AltScreen = true
 	// paint the entire surface with the page's own background so the
 	// document reads as one continuous sheet, not text on the terminal
 	if m.pageBG != "" {

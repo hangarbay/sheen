@@ -30,7 +30,6 @@ var (
 	styleFlag string
 	widthFlag int
 	pagerFlag bool
-	tuiFlag   bool
 	linksFlag string
 
 	rootCmd = &cobra.Command{
@@ -253,15 +252,13 @@ func executeCLI(src *source) error {
 	}
 
 	switch {
-	case pagerFlag && tuiFlag:
-		return errors.New("cannot use both pager and tui")
 	case pagerFlag:
 		out, err := render.Render(bytes.NewReader(b), opts)
 		if err != nil {
 			return fmt.Errorf("unable to render HTML: %w", err)
 		}
 		return runPager(out)
-	case tuiFlag || isTTY(os.Stdout):
+	case isTTY(os.Stdout):
 		// interactive terminal: the TUI is the only view; nothing is
 		// printed to the terminal after it exits
 		_, err := ui.NewProgram(ui.Config{
@@ -319,7 +316,6 @@ func main() {
 	rootCmd.Flags().StringVarP(&styleFlag, "style", "s", "auto", "style name (auto, dark, light, notty, ascii)")
 	rootCmd.Flags().IntVarP(&widthFlag, "width", "w", 0, "word-wrap width (default: terminal width)")
 	rootCmd.Flags().BoolVarP(&pagerFlag, "pager", "p", false, "display in an external pager ($PAGER, default less -r)")
-	rootCmd.Flags().BoolVarP(&tuiFlag, "tui", "t", false, "display in the interactive scrollable TUI")
 	rootCmd.Flags().StringVar(&linksFlag, "links", "auto", "link rendering (auto, osc8, inline, none)")
 
 	if err := rootCmd.Execute(); err != nil {
