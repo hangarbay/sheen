@@ -24,7 +24,7 @@ the releases page.
 
 ## Notes
 
-- Tag from a green master; the workflow builds whatever the tag points to.
+- Tag from a green main; the workflow builds whatever the tag points to.
 - If a release fails, delete the release and tag, then re-tag. The
   `gh release create` step is not idempotent.
 - Binaries are built with CGO disabled and `-trimpath`, so any runner

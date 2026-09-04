@@ -8,7 +8,7 @@ instead of Markdown.
 One-liner (macOS and Linux):
 
 ```
-curl -fsSL https://raw.githubusercontent.com/hangarbay/sheen/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/hangarbay/sheen/main/install.sh | sh
 ```
 
 Or download a tarball from the

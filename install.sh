@@ -1,6 +1,6 @@
 #!/bin/sh
 # Install the latest sheen release from GitHub.
-# Usage: curl -fsSL https://raw.githubusercontent.com/hangarbay/sheen/master/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/hangarbay/sheen/main/install.sh | sh
 set -eu
 
 repo="hangarbay/sheen"
