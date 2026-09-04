@@ -43,16 +43,24 @@ func (s lipStyle) paintPlain(text string) string {
 }
 
 // paint applies the resolved style of a segment, plus an OSC 8 hyperlink when
-// the segment belongs to a link. Whitespace-only text is never styled: there
-// is nothing to see and empty escape runs just add noise.
+// the segment belongs to a link. The active block/page background acts as an
+// underlay so background bands are solid; whitespace-only text carries only
+// that background (decorations and hyperlink envelopes on spaces are noise).
 func (r *renderer) paint(text string, st styleState, href string) string {
 	if text == "" {
 		return ""
 	}
-	if strings.TrimSpace(text) == "" {
-		return text
+	bg := st.bg
+	if bg == "" {
+		bg = r.bg()
 	}
-	ls := lipStyle{fg: st.fg, bg: st.bg, bold: st.bold, italic: st.italic,
+	if strings.TrimSpace(text) == "" {
+		if bg == "" || !r.ps.colored {
+			return text
+		}
+		return lipStyle{bg: bg}.paintPlain(text)
+	}
+	ls := lipStyle{fg: st.fg, bg: bg, bold: st.bold, italic: st.italic,
 		underline: st.underline, strike: st.strike}
 	if !r.ps.colored {
 		ls.fg = ""
@@ -231,7 +239,7 @@ func (r *renderer) emitItems(items []witem) string {
 // the resulting lines to the output.
 func (r *renderer) wrapPara() {
 	p := r.para
-	width := r.opts.Width
+	width := r.availWidth
 	avail1 := width - ansi.StringWidth(p.indent1)
 	avail2 := width - ansi.StringWidth(p.indent2)
 	if avail1 < 1 {

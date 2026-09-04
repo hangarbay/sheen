@@ -32,14 +32,23 @@ sheen [SOURCE|DIR]
 - `-` or a pipe: `curl -s https://example.com | sheen`
 - a directory: `sheen docs/` renders `docs/index.html`
 
+In an interactive terminal sheen opens a full-screen scrollable TUI that
+paints the page as a continuous sheet; nothing is printed to the terminal
+after it exits. Pipe or redirect to render straight to stdout instead:
+
+```
+sheen page.html | grep foo
+sheen page.html > out.txt
+```
+
 ## Flags
 
 | Flag | Description |
 |------|-------------|
 | `-s, --style` | `auto`, `dark`, `light`, `notty`, `ascii` |
 | `-w, --width` | word-wrap width (default: terminal width) |
-| `-p, --pager` | page through `$PAGER` (default `less -r`) |
-| `-t, --tui` | interactive scrollable TUI (`q` quit, vim/arrow keys, `g`/`G` top/bottom, `d`/`u` half-page) |
+| `-p, --pager` | page through `$PAGER` (default `less -r`) instead of the TUI |
+| `-t, --tui` | the TUI (already the default in interactive terminals) |
 | `--links` | `auto`, `osc8` (clickable hyperlinks), `inline`, `none` |
 | `--version` | print version |
 
@@ -52,7 +61,12 @@ sheen [SOURCE|DIR]
   class is present
 - A practical CSS subset: tag/class/id selectors with descendant and child
   combinators, specificity-based cascade, `style` attributes, colors,
-  bold/italic/underline, `display:none`, `text-align`, `white-space:pre`
+  bold/italic/underline, `display:none` and block-level `display`,
+  `text-align`, `white-space:pre`, `max-width`/`width` with auto margins
+  (centered columns), and `var()` custom properties with light/dark
+  `prefers-color-scheme` palettes
+- Page backgrounds render as a full-width sheet: the TUI paints its entire
+  surface with the page's own background color
 - `<title>` as a fallback heading when the page has no `<h1>`
 - Relative URLs resolved against the page's URL; remote pages may load
   their `<link rel="stylesheet">` stylesheets (http/https only)

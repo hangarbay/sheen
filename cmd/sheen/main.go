@@ -255,7 +255,15 @@ func executeCLI(src *source) error {
 	switch {
 	case pagerFlag && tuiFlag:
 		return errors.New("cannot use both pager and tui")
-	case tuiFlag:
+	case pagerFlag:
+		out, err := render.Render(bytes.NewReader(b), opts)
+		if err != nil {
+			return fmt.Errorf("unable to render HTML: %w", err)
+		}
+		return runPager(out)
+	case tuiFlag || isTTY(os.Stdout):
+		// interactive terminal: the TUI is the only view; nothing is
+		// printed to the terminal after it exits
 		_, err := ui.NewProgram(ui.Config{
 			HTML:            string(b),
 			Source:          sourceLabel(src),
@@ -269,9 +277,6 @@ func executeCLI(src *source) error {
 		out, err := render.Render(bytes.NewReader(b), opts)
 		if err != nil {
 			return fmt.Errorf("unable to render HTML: %w", err)
-		}
-		if pagerFlag {
-			return runPager(out)
 		}
 		if out != "" && !strings.HasSuffix(out, "\n") {
 			out += "\n"

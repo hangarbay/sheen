@@ -95,6 +95,9 @@ func (ss *stylesheet) add(css string, orderBase int, inMedia bool) int {
 			name := atRuleName(selText)
 			switch name {
 			case "media", "supports", "layer", "container":
+				if name == "media" && strings.Contains(strings.ToLower(selText), "print") {
+					continue // print styles never apply on screen
+				}
 				order = ss.add(block, order, true) // flatten inner rules
 			}
 			continue
