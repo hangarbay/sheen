@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Sheen Sample Document</title>
+  <style>
+    body { color: inherit; }
+    .tagline { color: #ff79c6; font-weight: bold; }
+    .secret { display: none; }
+    .meta { text-align: center; }
+    pre.raw { white-space: pre; }
+  </style>
+  <script>document.write("<p>never rendered</p>");</script>
+</head>
+<body>
+  <h1>Sheen Sample Document</h1>
+  <p class="tagline">HTML in your terminal, with pizzazz!</p>
+
+  <p>This paragraph contains <strong>bold</strong>, <em>italic</em>,
+     inline <code>code</code>, a <a href="https://charm.land">link</a>,
+     an image <img src="pic.png" alt="a picture">, and entities: &lt;tag&gt; &copy;</p>
+
+  <p class="secret">You should never see this line.</p>
+  <noscript>JavaScript is disabled, so this noscript block renders.</noscript>
+
+  <h2>Lists</h2>
+  <ul>
+    <li>First item</li>
+    <li>Second item
+      <ul><li>Nested point</li></ul>
+    </li>
+    <li>Third item</li>
+  </ul>
+  <ol start="3">
+    <li>Step three</li>
+    <li>Step four</li>
+  </ol>
+
+  <h2>Quote</h2>
+  <blockquote><p>Any sufficiently advanced terminal is indistinguishable from a TUI.</p></blockquote>
+
+  <h2>Table</h2>
+  <table>
+    <thead><tr><th>Element</th><th>Rendered</th></tr></thead>
+    <tbody>
+      <tr><td>Headings</td><td>yes</td></tr>
+      <tr><td>Tables</td><td>yes</td></tr>
+      <tr><td>JavaScript</td><td>never</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Code</h2>
+  <pre><code class="language-go">func main() {
+    fmt.Println("hello from chroma")
+}</code></pre>
+
+  <hr>
+  <p class="meta">fin.</p>
+</body>
+</html>
