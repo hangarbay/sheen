@@ -1,0 +1,41 @@
+name: Update Homebrew tap
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update tap formula
+        env:
+          GH_TOKEN: ${{ secrets.TAP_TOKEN }}
+          REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${REF#v}"
+          url="https://github.com/hangarbay/sheen/archive/refs/tags/${REF}.tar.gz"
+          sha256="$(curl -fsSL "$url" | shasum -a 256 | awk '{print $1}')"
+          work="$(mktemp -d)"
+          git clone --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/hangarbay/homebrew-tap.git" \
+            "$work/tap"
+          cd "$work/tap"
+          sed -i.bak \
+            -e "s|url \"[^\"]*\"|url \"${url}\"|" \
+            -e "s|sha256 \"[^\"]*\"|sha256 \"${sha256}\"|" \
+            Formula/sheen.rb
+          rm Formula/sheen.rb.bak
+          ruby -c Formula/sheen.rb
+          if git diff --quiet; then
+            echo "Formula already at ${version}; nothing to do."
+            exit 0
+          fi
+          git -c user.name="sheen-release-bot" \
+              -c user.email="actions@users.noreply.github.com" \
+              commit -am "sheen ${version}"
+          git push
