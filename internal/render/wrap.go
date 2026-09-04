@@ -142,7 +142,7 @@ func (r *renderer) flushPre() {
 	emit := func() {
 		line := strings.TrimRight(b.String(), " \t")
 		if p.indent1 != "" || p.indent2 != "" {
-			r.out = append(r.out, p.indent2+line)
+			r.out = append(r.out, r.bgPaint(p.indent2)+line)
 		} else {
 			r.out = append(r.out, line)
 		}
@@ -171,7 +171,7 @@ func (r *renderer) flushNoWrap() {
 		if len(items) == 0 {
 			return
 		}
-		r.out = append(r.out, p.indent1+r.emitItems(items))
+		r.out = append(r.out, r.bgPaint(p.indent1)+r.emitItems(items))
 	}
 	var cur []witem
 	for _, it := range buildItems(r.para.segs) {
@@ -303,7 +303,7 @@ func (r *renderer) wrapPara() {
 
 	for _, ln := range lines {
 		var b strings.Builder
-		b.WriteString(ln.indent)
+		b.WriteString(r.bgPaint(ln.indent))
 		pad := ln.avail - ln.cells
 		if pad > 0 {
 			switch p.align {

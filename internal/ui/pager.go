@@ -24,7 +24,10 @@ type Config struct {
 	FetchStylesheet func(string) ([]byte, error)
 }
 
-type contentRenderedMsg string
+type contentRenderedMsg struct {
+	content string
+	pageBG  string
+}
 
 type errMsg struct{ err error }
 
@@ -37,6 +40,7 @@ type model struct {
 	height int
 	ready  bool
 	fatal  error
+	pageBG string
 }
 
 // NewProgram returns a Tea program displaying the document in a scrollable
@@ -58,9 +62,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case contentRenderedMsg:
 		m.ready = true
+		m.pageBG = msg.pageBG
 		m.vp.SetWidth(m.width)
 		m.vp.SetHeight(m.height - statusBarHeight)
-		m.vp.SetContent(string(msg))
+		m.vp.SetContent(msg.content)
 		return m, nil
 
 	case errMsg:
@@ -104,7 +109,13 @@ func (m model) View() tea.View {
 	b.WriteString(m.vp.View())
 	b.WriteString("\n")
 	b.WriteString(m.statusBar())
-	return tea.NewView(b.String())
+	v := tea.NewView(b.String())
+	// paint the entire surface with the page's own background so the
+	// document reads as one continuous sheet, not text on the terminal
+	if m.pageBG != "" {
+		v.BackgroundColor = lipgloss.Color(m.pageBG)
+	}
+	return v
 }
 
 func (m model) statusBar() string {
@@ -133,7 +144,7 @@ func (m model) statusBar() string {
 
 func renderContent(cfg Config, width, height int) tea.Cmd {
 	return func() tea.Msg {
-		out, err := render.Render(strings.NewReader(cfg.HTML), render.Options{
+		content, pageBG, err := render.RenderSheet(strings.NewReader(cfg.HTML), render.Options{
 			Width:           width,
 			Preset:          cfg.Preset,
 			BaseURL:         cfg.BaseURL,
@@ -143,6 +154,6 @@ func renderContent(cfg Config, width, height int) tea.Cmd {
 		if err != nil {
 			return errMsg{err}
 		}
-		return contentRenderedMsg(out)
+		return contentRenderedMsg{content: content, pageBG: pageBG}
 	}
 }

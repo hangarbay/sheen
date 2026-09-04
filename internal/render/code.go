@@ -28,8 +28,9 @@ func (r *renderer) renderPre(n *html.Node, st styleState) {
 		cst.underline = false
 		cst.strike = false
 		if r.ps.colored {
-			cst.fg = codeFg(r.ps.name)
-			cst.bg = codeBg(r.ps.name)
+			// fg only: the page/block background shows through so code
+			// blocks stay coherent with the document's own theme
+			cst.fg = codeFg(r.uaDark)
 		}
 		for i, ln := range lines {
 			lines[i] = r.para.indent2 + r.paint(strings.TrimRight(ln, " \t"), cst, "")
@@ -43,18 +44,11 @@ func (r *renderer) renderPre(n *html.Node, st styleState) {
 	r.endBlock()
 }
 
-func codeFg(presetName string) string {
-	if presetName == "light" {
+func codeFg(dark bool) string {
+	if !dark {
 		return "#a31515"
 	}
 	return "#f8f8f2"
-}
-
-func codeBg(presetName string) string {
-	if presetName == "light" {
-		return "#eeeeee"
-	}
-	return "#3a4152"
 }
 
 func firstElement(n *html.Node, tag string) *html.Node {

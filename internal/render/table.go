@@ -7,9 +7,16 @@ import (
 	"golang.org/x/net/html"
 )
 
+// tableCell is one rendered cell: its styled text plus the cell's own
+// background color (used to fill the padded remainder of the column).
+type tableCell struct {
+	text string
+	bg   string
+}
+
 func (r *renderer) renderTable(n *html.Node, st styleState) {
-	var headers []string
-	var rows [][]string
+	var headers []tableCell
+	var rows [][]tableCell
 	hasHead := false
 
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
@@ -46,7 +53,7 @@ func (r *renderer) renderTable(n *html.Node, st styleState) {
 		headers, rows = promoteHeader(rows)
 	}
 
-	table := boxTable(headers, rows, r.ps, r.opts.Width)
+	table := r.boxTable(headers, rows, r.ps, r.availWidth)
 	if table != "" {
 		r.out = append(r.out, strings.Split(table, "\n")...)
 	}
@@ -70,18 +77,23 @@ func (r *renderer) renderTableCaption(c *html.Node, st styleState) {
 	r.stack = r.stack[:len(r.stack)-1]
 }
 
-func (r *renderer) tableRow(tr *html.Node) []string {
-	var cells []string
+func (r *renderer) tableRow(tr *html.Node) []tableCell {
+	var cells []tableCell
+	// tr participates in the selector stack so "tr.add td" style rules match
+	info := newElemInfo(tr)
+	r.stack = append(r.stack, info)
 	for c := tr.FirstChild; c != nil; c = c.NextSibling {
 		if c.Type == html.ElementNode && (c.Data == "td" || c.Data == "th") {
 			cells = append(cells, r.cellText(c))
 		}
 	}
+	r.stack = r.stack[:len(r.stack)-1]
 	return cells
 }
 
-// cellText renders one cell into a temporary buffer and returns its text.
-func (r *renderer) cellText(cell *html.Node) string {
+// cellText renders one cell into a temporary buffer and returns its text
+// along with the cell's computed background color.
+func (r *renderer) cellText(cell *html.Node) tableCell {
 	outMark := len(r.out)
 	savedPara, savedSt, savedHref := r.para, r.st, r.href
 	r.para = para{}
@@ -104,27 +116,28 @@ func (r *renderer) cellText(cell *html.Node) string {
 	}
 	r.out = r.out[:outMark]
 	r.para, r.st, r.href = savedPara, savedSt, savedHref
-	return strings.Join(lines, " ")
+	return tableCell{text: strings.Join(lines, " "), bg: st.bg}
 }
 
-func promoteHeader(rows [][]string) ([]string, [][]string) {
+func promoteHeader(rows [][]tableCell) ([]tableCell, [][]tableCell) {
 	if len(rows) == 0 {
 		return nil, nil
 	}
 	for _, c := range rows[0] {
-		if !strings.Contains(c, "\x1b[1m") {
+		if !strings.Contains(c.text, "\x1b[1m") {
 			return nil, rows
 		}
 	}
 	return rows[0], rows[1:]
 }
 
-// boxTable renders a fixed-width table with box-drawing borders.
-func boxTable(headers []string, rows [][]string, ps preset, width int) string {
-	all := append([][]string{}, rows...)
+// boxTable renders a fixed-width table with box-drawing borders. Cell
+// padding carries the cell's background so filled rows read as solid bands.
+func (r *renderer) boxTable(headers []tableCell, rows [][]tableCell, ps preset, width int) string {
+	all := append([][]tableCell{}, rows...)
 	hasHead := len(headers) > 0
 	if hasHead {
-		all = append([][]string{headers}, all...)
+		all = append([][]tableCell{headers}, all...)
 	}
 	if len(all) == 0 {
 		return ""
@@ -142,11 +155,11 @@ func boxTable(headers []string, rows [][]string, ps preset, width int) string {
 	widths := make([]int, ncols)
 	for _, row := range all {
 		for i := 0; i < ncols; i++ {
-			var cell string
+			var cell tableCell
 			if i < len(row) {
 				cell = row[i]
 			}
-			if w := ansi.StringWidth(cell); w > widths[i] {
+			if w := ansi.StringWidth(cell.text); w > widths[i] {
 				widths[i] = w
 			}
 		}
@@ -172,12 +185,12 @@ func boxTable(headers []string, rows [][]string, ps preset, width int) string {
 		widths[best]--
 	}
 
-	trunc := func(cell string, w int) string {
-		if ansi.StringWidth(cell) <= w {
+	trunc := func(cell tableCell, w int) tableCell {
+		if ansi.StringWidth(cell.text) <= w {
 			return cell
 		}
 		// hard cut: strip styling so escape pairs can't dangle mid-cell
-		return ansi.Truncate(ansi.Strip(cell), w, "…")
+		return tableCell{text: ansi.Truncate(ansi.Strip(cell.text), w, "…"), bg: cell.bg}
 	}
 
 	h, vm := ps.hr(), "│"
@@ -196,23 +209,31 @@ func boxTable(headers []string, rows [][]string, ps preset, width int) string {
 		}
 		s := l + strings.Join(parts, m) + rr
 		if ps.colored {
-			s = lipStyle{fg: "#5c6370"}.paintPlain(s)
+			s = lipStyle{fg: "#5c6370", bg: r.bg()}.paintPlain(s)
 		}
 		return s
 	}
 
-	renderRow := func(row []string) string {
+	renderRow := func(row []tableCell) string {
 		parts := make([]string, ncols)
 		for i := 0; i < ncols; i++ {
-			var cell string
+			var cell tableCell
 			if i < len(row) {
 				cell = trunc(row[i], widths[i])
 			}
-			pad := widths[i] - ansi.StringWidth(cell)
+			pad := widths[i] - ansi.StringWidth(cell.text)
 			if pad < 0 {
 				pad = 0
 			}
-			parts[i] = " " + cell + strings.Repeat(" ", pad+1)
+			spaces := strings.Repeat(" ", pad+1)
+			padBG := cell.bg
+			if padBG == "" {
+				padBG = r.bg()
+			}
+			if ps.colored && padBG != "" {
+				spaces = lipStyle{bg: padBG}.paintPlain(spaces)
+			}
+			parts[i] = r.bgPaint(" ") + cell.text + spaces
 		}
 		return vm + strings.Join(parts, vm) + vm
 	}

@@ -111,12 +111,12 @@ func TestMatchSelectorCombinators(t *testing.T) {
 
 func TestStylesheetCascade(t *testing.T) {
 	ss := &stylesheet{}
-	ss.add("p { color: #111111; }", 0)      // tag, order 0
-	ss.add(".c { color: #222222; }", 10)    // class beats tag
-	ss.add("p.c { color: #333333; }", 20)   // tag+class beats class
-	ss.add("#i { color: #444444; }", 30)    // id beats all
-	ss.add(".late { color: #555555; }", 40) // tie broken by order
-	ss.add(".late { color: #666666; }", 41)
+	ss.add("p { color: #111111; }", 0, false)      // tag, order 0
+	ss.add(".c { color: #222222; }", 10, false)    // class beats tag
+	ss.add("p.c { color: #333333; }", 20, false)   // tag+class beats class
+	ss.add("#i { color: #444444; }", 30, false)    // id beats all
+	ss.add(".late { color: #555555; }", 40, false) // tie broken by order
+	ss.add(".late { color: #666666; }", 41, false)
 	ss.sortRules()
 
 	st := &styleState{}
@@ -153,7 +153,7 @@ func TestStylesheetAtRules(t *testing.T) {
 @keyframes spin { from { x: 1 } to { x: 2 } }
 @import url("x.css");
 .out { display: none; }
-`, 0)
+`, 0, false)
 
 	if len(ss.rules) != 2 {
 		t.Fatalf("expected 2 rules (media flattened, at-rules skipped), got %d", len(ss.rules))

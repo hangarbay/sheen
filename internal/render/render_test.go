@@ -190,8 +190,8 @@ func TestTitleFallbackWhenNoH1(t *testing.T) {
 func TestCSSColorsReachRender(t *testing.T) {
 	r := &renderer{opts: Options{Width: 80}, ps: presets["dark"], links: "inline"}
 	r.ss = &stylesheet{}
-	r.ss.add(userAgentCSS(r.ps), 0)
-	r.ss.add(`.warn { color: #ff0000; }`, 1000)
+	r.ss.add(userAgentCSS(r.ps, true), 0, false)
+	r.ss.add(`.warn { color: #ff0000; }`, 1000, false)
 	r.ss.sortRules()
 	st := styleState{}
 	r.applyCSS(&st, &elemInfo{tag: "p", classes: []string{"warn"}}, "")
@@ -213,8 +213,8 @@ func TestCSSDisplayNone(t *testing.T) {
 func TestInlineStyleAttrWins(t *testing.T) {
 	r := &renderer{opts: Options{Width: 80}, ps: presets["dark"], links: "inline"}
 	r.ss = &stylesheet{}
-	r.ss.add(userAgentCSS(r.ps), 0)
-	r.ss.add(`p{color:#ff0000}`, 1000)
+	r.ss.add(userAgentCSS(r.ps, true), 0, false)
+	r.ss.add(`p{color:#ff0000}`, 1000, false)
 	r.ss.sortRules()
 	st := styleState{}
 	r.applyCSS(&st, &elemInfo{tag: "p"}, "color:#00ff00")
@@ -292,4 +292,135 @@ func mustURL(s string) *url.URL {
 		panic(err)
 	}
 	return u
+}
+
+func TestCSSVarResolution(t *testing.T) {
+	r := &renderer{opts: Options{Width: 80}, ps: presets["dark"], links: "inline"}
+	r.ss = &stylesheet{}
+	r.ss.add(userAgentCSS(r.ps, true), 0, false)
+	r.ss.add(`:root { --accent: #FFB000; } .e { color: var(--accent); }`, 1000, false)
+	r.ss.resolveVars(true)
+	st := styleState{}
+	r.applyCSS(&st, &elemInfo{tag: "p", classes: []string{"e"}}, "")
+	if st.fg != "#ffb000" {
+		t.Errorf("var() not resolved, fg=%q", st.fg)
+	}
+}
+
+func TestRootNotSelectorTolerated(t *testing.T) {
+	r := &renderer{opts: Options{Width: 80}, ps: presets["dark"], links: "inline"}
+	r.ss = &stylesheet{}
+	r.ss.add(userAgentCSS(r.ps, true), 0, false)
+	r.ss.add(`:root:not([data-theme="light"]) { --bg: #0C1116; } body { background-color: var(--bg); }`, 1000, false)
+	r.ss.resolveVars(true)
+	st := styleState{}
+	r.applyCSS(&st, &elemInfo{tag: "body"}, "")
+	if st.bg != "#0c1116" {
+		t.Errorf(":root:not(...) rule dropped, bg=%q", st.bg)
+	}
+}
+
+func TestBlockCenteringCh(t *testing.T) {
+	out := renderStr(t,
+		`<style>.w{max-width:20ch;margin:0 auto}</style><div class="w"><p>hello world</p></div>`,
+		plainOpts(40))
+	// 40-wide terminal, 20-cell column → 10 cells of left padding
+	if !strings.HasPrefix(out, strings.Repeat(" ", 10)+"hello world") {
+		t.Errorf("expected centered column, got %q", out)
+	}
+}
+
+func TestBlockPercentWidth(t *testing.T) {
+	out := renderStr(t,
+		`<style>.w{width:50%;margin:0 auto}</style><div class="w"><p>hi</p></div>`,
+		plainOpts(40))
+	if !strings.HasPrefix(out, strings.Repeat(" ", 10)+"hi") {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestPxViewportHeuristic(t *testing.T) {
+	out := renderStr(t,
+		`<style>.w{max-width:640px;margin:0 auto}</style><div class="w"><p>x</p></div>`,
+		plainOpts(128))
+	// 640px of an assumed 1280px viewport → 64 cells → 32 left
+	if !strings.HasPrefix(out, strings.Repeat(" ", 32)+"x") {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestMarginLeftAutoRightAligns(t *testing.T) {
+	out := renderStr(t,
+		`<style>.r{max-width:10ch;margin-left:auto}</style><div class="r"><p>x</p></div>`,
+		plainOpts(30))
+	if !strings.HasPrefix(out, strings.Repeat(" ", 20)+"x") {
+		t.Errorf("got %q", out)
+	}
+}
+
+func TestPageBackgroundSheet(t *testing.T) {
+	out := renderStr(t,
+		`<style>body{background-color:#FFFFFF}</style><p>hi</p>`,
+		Options{Width: 20, Preset: "dark", Links: "inline"})
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if w := ansi.StringWidth(line); w != 20 {
+			t.Errorf("line %d width %d, want 20 (sheet fill): %q", i, w, line)
+		}
+		if !strings.Contains(line, "\x1b[48;2;255;255;255m") {
+			t.Errorf("line %d missing white background: %q", i, line)
+		}
+	}
+}
+
+func TestBlockBackgroundBand(t *testing.T) {
+	out := renderStr(t,
+		`<style>body{background-color:#10151C}.band{background-color:#333333}</style><div class="band">x</div>`,
+		Options{Width: 16, Preset: "dark", Links: "inline"})
+	lines := strings.Split(out, "\n")
+	if len(lines) != 1 {
+		t.Fatalf("want one band line, got %q", out)
+	}
+	if w := ansi.StringWidth(lines[0]); w != 16 {
+		t.Errorf("band width %d, want 16", w)
+	}
+	if !strings.Contains(lines[0], "\x1b[48;2;51;51;51m") {
+		t.Errorf("band missing #333 background: %q", lines[0])
+	}
+}
+
+func TestTableCellBackgroundPadding(t *testing.T) {
+	out := renderStr(t,
+		`<style>td.hot{background-color:#FF0000}</style>`+
+			`<table><tr><td class="hot">a</td><td>b</td></tr></table>`,
+		Options{Width: 40, Preset: "dark", Links: "inline"})
+	if !strings.Contains(out, "\x1b[48;2;255;0;0m") {
+		t.Errorf("cell background missing: %q", out)
+	}
+	// the a cell is padded well past its 1-cell content, and the padding
+	// carries the cell background (solid band, not a single red letter)
+	red := strings.Count(out, "\x1b[48;2;255;0;0m")
+	if red < 2 {
+		t.Errorf("expected text + padding bg runs, got %d in %q", red, out)
+	}
+}
+
+func TestBandCoversListIndents(t *testing.T) {
+	out := renderStr(t,
+		`<style>body{background-color:#10151C}.band{background-color:#333333}</style>`+
+			`<div class="band"><ul><li>one</li><li>two</li></ul></div>`,
+		Options{Width: 30, Preset: "dark", Links: "inline"})
+	lines := strings.Split(out, "\n")
+	if len(lines) != 2 {
+		t.Fatalf("want 2 list lines, got %d: %q", len(lines), out)
+	}
+	for i, line := range lines {
+		if w := ansi.StringWidth(line); w != 30 {
+			t.Errorf("line %d width %d, want full band width 30", i, w)
+		}
+		// the bullet/indent prefix itself must carry the band background
+		if !strings.HasPrefix(line, "\x1b[48;2;51;51;51m") {
+			t.Errorf("line %d indent not underlaid with band bg: %q", i, line)
+		}
+	}
 }

@@ -38,19 +38,22 @@ type rule struct {
 	classes int
 	tags    int
 	order   int
+	media   bool // rule came from inside an @media block (theme bucket)
 }
 
 type stylesheet struct {
 	rules []rule
+	vars  map[string]string // custom properties declared on :root
 }
 
 var supportedPseudoClasses = map[string]bool{
 	"hover": true, "focus": true, "active": true, "visited": true, "link": true,
+	"root": true,
 }
 
 // add parses a CSS document and appends its rules. Nested blocks (media
 // queries and similar) are flattened and applied regardless of context.
-func (ss *stylesheet) add(css string, orderBase int) int {
+func (ss *stylesheet) add(css string, orderBase int, inMedia bool) int {
 	css = stripCSSComments(css)
 	order := orderBase
 	i := 0
@@ -92,7 +95,7 @@ func (ss *stylesheet) add(css string, orderBase int) int {
 			name := atRuleName(selText)
 			switch name {
 			case "media", "supports", "layer", "container":
-				order = ss.add(block, order) // flatten inner rules
+				order = ss.add(block, order, true) // flatten inner rules
 			}
 			continue
 		}
@@ -101,7 +104,7 @@ func (ss *stylesheet) add(css string, orderBase int) int {
 			if !ok {
 				continue
 			}
-			r := rule{sel: sel, decls: parseDecls(block), order: order}
+			r := rule{sel: sel, decls: parseDecls(block), order: order, media: inMedia}
 			for _, p := range sel.parts {
 				if p.id != "" {
 					r.ids++
@@ -227,10 +230,32 @@ func parseCompound(s string) (compoundSel, string, bool) {
 				return c, s, false
 			}
 			pseudo := strings.ToLower(s[i+1 : j])
+			if pseudo == "not" && j < len(s) && s[j] == '(' {
+				// tolerate :not(...) — the argument syntax (attribute
+				// selectors etc.) is unsupported, but the condition is
+				// almost always a theme guard, so treat it as matching
+				depth := 0
+				for j < len(s) {
+					if s[j] == '(' {
+						depth++
+					} else if s[j] == ')' {
+						depth--
+						if depth == 0 {
+							j++
+							break
+						}
+					}
+					j++
+				}
+				c.classes = append(c.classes, ":not")
+				i = j
+				continue
+			}
 			if !supportedPseudoClasses[pseudo] {
 				return c, s, false
 			}
-			// supported pseudo-classes always match; they only add specificity
+			// supported pseudo-classes add specificity; :root must match
+			// the html element, the rest always match
 			c.classes = append(c.classes, ":"+pseudo)
 			i = j
 		case ' ', '\t', '\r', '\n', '>', '+', '~', '[', ')':
@@ -268,6 +293,89 @@ func (ss *stylesheet) sortRules() {
 			rs[j], rs[j-1] = rs[j-1], rs[j]
 		}
 	}
+}
+
+// resolveVars gathers custom properties declared on :root rules, then
+// substitutes var() references in every declaration value. Theme-adaptive
+// pages declare a light palette at the top level and a dark palette inside
+// @media (prefers-color-scheme: dark); preferDark picks which bucket wins,
+// falling back to whichever exists. Must run after all add() calls.
+func (ss *stylesheet) resolveVars(preferDark bool) {
+	light, dark := map[string]string{}, map[string]string{}
+	for _, r := range ss.rules {
+		if !isRootRule(r) {
+			continue
+		}
+		bucket := light
+		if r.media {
+			bucket = dark
+		}
+		for _, d := range r.decls {
+			if strings.HasPrefix(d.prop, "--") {
+				bucket[d.prop] = d.val
+			}
+		}
+	}
+	chosen := light
+	if preferDark {
+		chosen = dark
+	}
+	if len(chosen) == 0 {
+		if preferDark && len(light) > 0 {
+			chosen = light
+		} else if !preferDark && len(dark) > 0 {
+			chosen = dark
+		}
+	}
+	ss.vars = chosen
+	for i := range ss.rules {
+		for j := range ss.rules[i].decls {
+			ss.rules[i].decls[j].val = ss.resolve(ss.rules[i].decls[j].val)
+		}
+	}
+}
+
+func isRootRule(r rule) bool {
+	if len(r.sel.parts) != 1 {
+		return false
+	}
+	p := r.sel.parts[0]
+	if p.tag != "" && p.tag != "html" {
+		return false
+	}
+	for _, cl := range p.classes {
+		if cl == ":root" || cl == ":not" {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// resolve substitutes var(--name) references using the collected :root
+// custom properties; unknown names resolve to the empty string.
+func (ss *stylesheet) resolve(s string) string {
+	if len(ss.vars) == 0 || !strings.Contains(s, "var(") {
+		return s
+	}
+	var b strings.Builder
+	for {
+		i := strings.Index(s, "var(")
+		if i < 0 {
+			b.WriteString(s)
+			break
+		}
+		b.WriteString(s[:i])
+		rest := s[i+4:]
+		j := strings.IndexByte(rest, ')')
+		if j < 0 {
+			b.WriteString("var(")
+			break
+		}
+		b.WriteString(ss.vars[strings.TrimSpace(rest[:j])])
+		s = rest[j+1:]
+	}
+	return b.String()
 }
 
 func ruleLess(a, b rule) bool {
@@ -308,6 +416,12 @@ func matchCompound(c compoundSel, ei *elemInfo) bool {
 		return false
 	}
 	for _, cl := range c.classes {
+		if cl == ":root" {
+			if ei.tag != "html" {
+				return false
+			}
+			continue
+		}
 		if strings.HasPrefix(cl, ":") {
 			continue // supported pseudo-classes always match
 		}

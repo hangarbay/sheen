@@ -1,6 +1,7 @@
 package render
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -51,13 +52,18 @@ type styleState struct {
 	align     string // "", "left", "center", "right"
 	pre       bool   // white-space: pre
 	nowrap    bool   // white-space: nowrap
-	// displayNone and bg are non-inherited; they are reset at each element.
-	displayNone bool
+	display   string // "", "inline", "block", "none"
+	// max-width/width and auto margins are non-inherited; they drive block
+	// centering and are reset at each element together with bg/display.
+	maxWidthRaw     string
+	marginLeftAuto  bool
+	marginRightAuto bool
+	displayNone     bool
 }
 
 // userAgentCSS is the builtin "browser stylesheet". Colored presets get a
 // syntax-highlight-like palette; notty/ascii keep structure only.
-func userAgentCSS(p preset) string {
+func userAgentCSS(p preset, dark bool) string {
 	if !p.colored {
 		return `
 h1,h2,h3,h4,h5,h6{font-weight:bold}
@@ -69,7 +75,7 @@ code,kbd,samp,var{font-style:normal}
 center{text-align:center}
 `
 	}
-	if p.name == "light" {
+	if !dark {
 		return `
 h1{font-weight:bold;color:#ad1457}
 h2{font-weight:bold;color:#0277bd}
@@ -78,7 +84,7 @@ h4{font-weight:bold;color:#b45309}
 h5{font-weight:bold;color:#6a1b9a}
 h6{font-weight:bold;color:#455a64}
 a{text-decoration:underline;color:#0969da}
-code,kbd,samp,var{color:#a31515;background-color:#eeeeee}
+code,kbd,samp,var{color:#a31515}
 blockquote{color:#57606a}
 img{color:#6e7781}
 mark{background-color:#fff3b8}
@@ -97,7 +103,7 @@ h4{font-weight:bold;color:#f1fa8c}
 h5{font-weight:bold;color:#ffb86c}
 h6{font-weight:bold;color:#bd93f9}
 a{text-decoration:underline;color:#6cb2ff}
-code,kbd,samp,var{color:#f8f8f2;background-color:#3a4152}
+code,kbd,samp,var{color:#f8f8f2}
 blockquote{color:#9aa4b2}
 img{color:#7d8590}
 mark{background-color:#5a4a00}
@@ -124,7 +130,13 @@ func (r *renderer) applyCSS(st *styleState, info *elemInfo, styleAttr string) {
 		applyDecls(st, []decl{{prop: "text-align", val: align}})
 	}
 	if styleAttr != "" {
-		applyDecls(st, parseDecls(styleAttr))
+		decls := parseDecls(styleAttr)
+		if r.ss != nil {
+			for i := range decls {
+				decls[i].val = r.ss.resolve(decls[i].val)
+			}
+		}
+		applyDecls(st, decls)
 	}
 }
 
@@ -185,10 +197,103 @@ func applyDecls(st *styleState, decls []decl) {
 				st.pre = false
 				st.nowrap = false
 			}
+		case "max-width", "width":
+			st.maxWidthRaw = d.val
+		case "margin":
+			toks := strings.Fields(d.val)
+			var left, right string
+			switch len(toks) {
+			case 1:
+				left, right = toks[0], toks[0]
+			case 2:
+				left, right = toks[1], toks[1]
+			case 3:
+				left, right = toks[1], toks[1]
+			case 4:
+				left, right = toks[3], toks[1]
+			}
+			st.marginLeftAuto = left == "auto"
+			st.marginRightAuto = right == "auto"
+		case "margin-left":
+			st.marginLeftAuto = d.val == "auto"
+		case "margin-right":
+			st.marginRightAuto = d.val == "auto"
 		case "display":
-			st.displayNone = d.val == "none"
+			switch d.val {
+			case "none":
+				st.displayNone = true
+				st.display = "none"
+			case "block", "flex", "grid", "table", "list-item", "flow-root":
+				st.display = "block"
+			case "inline", "inline-block", "inline-flex", "inline-grid", "inline-table":
+				st.display = "inline"
+			}
 		}
 	}
+}
+
+// cssSizeToCells converts a CSS length to terminal cells. ch and bare
+// numbers map 1:1, percentages map against the available width, and px
+// values scale against an assumed ~1280px browser viewport so common
+// "content column" widths (700-1000px) land in a sensible cell range.
+func cssSizeToCells(v string, avail int) int {
+	v = strings.ToLower(strings.TrimSpace(v))
+	if v == "" || v == "auto" || v == "none" {
+		return 0
+	}
+	i := 0
+	sign := 1.0
+	if i < len(v) && (v[i] == '-' || v[i] == '+') {
+		if v[i] == '-' {
+			sign = -1
+		}
+		i++
+	}
+	start := i
+	for i < len(v) && (v[i] >= '0' && v[i] <= '9' || v[i] == '.') {
+		i++
+	}
+	f, err := strconv.ParseFloat(v[start:i], 64)
+	if err != nil || f <= 0 {
+		return 0
+	}
+	f *= sign
+	unit := v[i:]
+	var cells float64
+	switch {
+	case unit == "" || unit == "ch":
+		cells = f
+	case unit == "%":
+		cells = f * float64(avail) / 100
+	case unit == "px" || unit == "pt":
+		cells = f * float64(avail) / 1280
+	case unit == "em" || unit == "rem":
+		cells = f * 16 * float64(avail) / 1280
+	case unit == "vw":
+		cells = f * float64(avail) / 100
+	default:
+		return 0
+	}
+	if cells < 1 {
+		return 0
+	}
+	return int(math.Round(cells))
+}
+
+// hexLuminance returns perceived luminance (0-1) of a #rrggbb color, or -1
+// when the value isn't a simple hex color.
+func hexLuminance(hex string) float64 {
+	if len(hex) != 7 || hex[0] != '#' {
+		return -1
+	}
+	v, err := strconv.ParseUint(hex[1:], 16, 32)
+	if err != nil {
+		return -1
+	}
+	r := float64(v>>16&0xFF) / 255
+	g := float64(v>>8&0xFF) / 255
+	b := float64(v&0xFF) / 255
+	return 0.2126*r + 0.7152*g + 0.0722*b
 }
 
 func parseFontWeight(v string) bool {

@@ -26,9 +26,17 @@ type Options struct {
 
 // Render parses HTML and returns terminal-formatted text.
 func Render(r io.Reader, opts Options) (string, error) {
+	content, _, err := RenderSheet(r, opts)
+	return content, err
+}
+
+// RenderSheet renders like Render and additionally reports the page's own
+// background color (empty when the page doesn't declare one) so full-screen
+// consumers can paint the entire surface with it.
+func RenderSheet(r io.Reader, opts Options) (string, string, error) {
 	doc, err := html.Parse(r)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if opts.Width <= 0 {
 		opts.Width = 80
@@ -45,8 +53,10 @@ func Render(r io.Reader, opts Options) (string, error) {
 	default:
 		opts.Links = "osc8"
 	}
-	rr := &renderer{opts: opts, ps: presets[opts.Preset], links: opts.Links}
-	return rr.renderDocument(doc), nil
+	rr := &renderer{opts: opts, ps: presets[opts.Preset], links: opts.Links,
+		availWidth: opts.Width, uaDark: opts.Preset != "light"}
+	content := rr.renderDocument(doc)
+	return content, rr.pageBG, nil
 }
 
 type seg struct {
@@ -74,6 +84,11 @@ type renderer struct {
 	href  string // current <a href> while walking children
 	links string
 
+	availWidth int    // effective wrap width (shrinks inside centered blocks)
+	pageBG     string // body background: the page "sheet"
+	bgStack    []string
+	uaDark     bool // whether the UA palette should be the dark variant
+
 	listDepth   int
 	listIndex   int
 	listOrdered bool
@@ -93,18 +108,44 @@ var skipElements = map[string]bool{
 	"canvas": true,
 }
 
+var blockFlowTags = map[string]bool{
+	"address": true, "article": true, "aside": true, "blockquote": true,
+	"center": true, "details": true, "div": true, "fieldset": true,
+	"figure": true, "figcaption": true, "footer": true, "form": true,
+	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
+	"header": true, "main": true, "nav": true, "p": true, "pre": true,
+	"section": true, "table": true, "hr": true,
+}
+
 func (r *renderer) renderDocument(doc *html.Node) string {
 	var css []string
 	r.collect(doc, &css)
 
 	r.ss = &stylesheet{}
-	order := r.ss.add(userAgentCSS(r.ps), 0)
+	// author rules get high order numbers so the UA sheet (added later,
+	// once the page's own theme is known) still sorts first
+	const authorOrderBase = 1_000_000
+	order := authorOrderBase
 	for _, chunk := range css {
-		order = r.ss.add(chunk, order)
+		order = r.ss.add(chunk, order, false)
 	}
 	r.ss.sortRules()
+	r.ss.resolveVars(r.ps.name != "light")
 
 	body := findElement(doc, "body")
+	if body != nil {
+		info := newElemInfo(body)
+		st := styleState{}
+		r.applyCSS(&st, info, attrValue(body, "style"))
+		r.pageBG = st.bg
+		// match the UA palette to the page's own theme when it declares one
+		if lum := hexLuminance(r.pageBG); lum >= 0 {
+			r.uaDark = lum < 0.5
+		}
+	}
+	r.ss.add(userAgentCSS(r.ps, r.uaDark), 0, false)
+	r.ss.sortRules()
+
 	if body != nil {
 		if !hasElement(body, "h1") && r.title != "" {
 			r.titleHeading()
@@ -120,7 +161,7 @@ func (r *renderer) renderDocument(doc *html.Node) string {
 			r.stack = r.stack[:len(r.stack)-1]
 		}
 	}
-	return finalize(r.out)
+	return r.finalize()
 }
 
 // collect harvests the document title and author CSS (style elements plus
@@ -187,7 +228,11 @@ func (r *renderer) element(n *html.Node) {
 	parentSt := r.st
 	st := parentSt
 	st.displayNone = false
+	st.display = ""
 	st.bg = "" // background-color is not inherited
+	st.maxWidthRaw = ""
+	st.marginLeftAuto = false
+	st.marginRightAuto = false
 	r.applyCSS(&st, info, attrValue(n, "style"))
 
 	if st.displayNone || hasAttr(n, "hidden") ||
@@ -200,9 +245,93 @@ func (r *renderer) element(n *html.Node) {
 
 	r.stack = append(r.stack, info)
 	r.st = st
+
+	blockish := st.display == "block" || blockFlowTags[n.Data]
+	if blockish {
+		r.endBlock()
+	}
+	mark := len(r.out)
+	savedW := r.availWidth
+	pad := 0
+	bgPushed := false
+	if blockish {
+		if eff := cssSizeToCells(st.maxWidthRaw, savedW); eff > 0 && eff < savedW {
+			if st.marginLeftAuto && st.marginRightAuto {
+				pad = (savedW - eff) / 2
+			} else if st.marginLeftAuto {
+				pad = savedW - eff
+			}
+			r.availWidth = eff
+		}
+		if st.bg != "" && r.ps.colored {
+			r.bgStack = append(r.bgStack, st.bg)
+			bgPushed = true
+		}
+	}
+
 	r.dispatch(n, st)
+
+	if blockish {
+		r.flushInline()
+		if bgPushed {
+			r.bgStack = r.bgStack[:len(r.bgStack)-1]
+			// fill the block's lines to its full width with its background;
+			// nested blocks have already filled themselves (append-only layering)
+			for i := mark; i < len(r.out); i++ {
+				r.out[i] = r.fillBG(r.out[i], st.bg, savedW)
+			}
+		}
+		r.availWidth = savedW
+		if pad > 0 {
+			// the centering gutter carries the active background so bands
+			// stay solid (paint resolves whitespace to the current bg)
+			gutter := r.paint(strings.Repeat(" ", pad), styleState{}, "")
+			for i := mark; i < len(r.out); i++ {
+				if r.out[i] != "" {
+					r.out[i] = gutter + r.out[i]
+				}
+			}
+		}
+		r.endBlock()
+	}
 	r.st = parentSt
 	r.stack = r.stack[:len(r.stack)-1]
+}
+
+// bg returns the active background: the innermost block with an explicit
+// background-color, falling back to the page sheet (body background).
+func (r *renderer) bg() string {
+	if len(r.bgStack) > 0 {
+		return r.bgStack[len(r.bgStack)-1]
+	}
+	return r.pageBG
+}
+
+// bgPaint adds the active background underlay to raw (unstyled) line
+// fragments — indents, list markers, quote glyphs, borders — so background
+// bands have no transparent gaps.
+func (r *renderer) bgPaint(s string) string {
+	if s == "" || !r.ps.colored {
+		return s
+	}
+	if bg := r.bg(); bg != "" {
+		return lipStyle{bg: bg}.paintPlain(s)
+	}
+	return s
+}
+
+// fillBG extends a line to width with background-colored padding. Lines
+// that are already at least as wide as the target are left untouched so
+// overflowing pre content is preserved.
+func (r *renderer) fillBG(line, bg string, width int) string {
+	if bg == "" || !r.ps.colored {
+		return line
+	}
+	w := ansi.StringWidth(line)
+	if w >= width {
+		return line
+	}
+	return line + lipStyle{bg: bg}.paintPlain(strings.Repeat(" ", width-w))
 }
 
 func (r *renderer) dispatch(n *html.Node, st styleState) {
@@ -215,9 +344,9 @@ func (r *renderer) dispatch(n *html.Node, st styleState) {
 
 	case "hr":
 		r.endBlock()
-		line := strings.Repeat(r.ps.hr(), r.opts.Width)
+		line := strings.Repeat(r.ps.hr(), r.availWidth)
 		if r.ps.colored {
-			line = lipStyle{fg: "#5c6370"}.paintPlain(line)
+			line = lipStyle{fg: "#5c6370", bg: r.bg()}.paintPlain(line)
 		}
 		r.out = append(r.out, line)
 		r.endBlock()
@@ -323,6 +452,11 @@ func (r *renderer) dispatch(n *html.Node, st styleState) {
 		r.walkChildren(n)
 		r.para.segs = append(r.para.segs, seg{text: "”", st: st, href: r.href})
 
+	case "sup":
+		// superscript glue ("FP-0041") reads badly; mark it explicitly
+		r.para.segs = append(r.para.segs, seg{text: "^", st: st, href: r.href})
+		r.walkChildren(n)
+
 	default:
 		r.walkChildren(n)
 	}
@@ -360,8 +494,8 @@ func (r *renderer) emitBlockquote(mark int, st styleState) {
 	}
 	r.out = r.out[:mark]
 	glyph := strings.TrimRight(r.ps.quote(), " ")
-	if r.ps.colored && st.fg != "" {
-		glyph = lipStyle{fg: st.fg}.paintPlain(glyph)
+	if r.ps.colored {
+		glyph = lipStyle{fg: st.fg, bg: r.bg()}.paintPlain(glyph)
 	}
 	for _, line := range lines {
 		if line == "" {
@@ -396,6 +530,9 @@ func (r *renderer) renderImage(n *html.Node, st styleState) {
 func (r *renderer) resolveLink(href string) string {
 	if href == "" {
 		return ""
+	}
+	if strings.HasPrefix(href, "#") {
+		return "" // in-page fragment: nothing to show, don't linkify
 	}
 	u, err := url.Parse(href)
 	if err != nil {
@@ -466,12 +603,20 @@ func (r *renderer) flushInline() {
 	r.para.segs = nil
 }
 
-func finalize(out []string) string {
-	for len(out) > 0 && out[0] == "" {
+// finalize trims blank edges and, when the page declares a body
+// background, paints a full-width "sheet" behind every line.
+func (r *renderer) finalize() string {
+	out := r.out
+	for len(out) > 0 && ansi.StringWidth(out[0]) == 0 {
 		out = out[1:]
 	}
-	for len(out) > 0 && out[len(out)-1] == "" {
+	for len(out) > 0 && ansi.StringWidth(out[len(out)-1]) == 0 {
 		out = out[:len(out)-1]
+	}
+	if r.pageBG != "" && r.ps.colored {
+		for i := range out {
+			out[i] = r.fillBG(out[i], r.pageBG, r.opts.Width)
+		}
 	}
 	return strings.Join(out, "\n")
 }
